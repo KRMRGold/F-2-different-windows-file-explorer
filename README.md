@@ -1,7 +1,7 @@
 # F-2 — Different Windows File Explorer
 
 > **Project status:** Initial design / pre-implementation  
-> **Design version:** 0.4.0  
+> **Design version:** 0.5.0  
 > **Target platform:** Windows  
 > **Development workflow:** [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md), initially adopted at **v1.9.2**  
 > **Implementation status:** No application implementation has been established by this document.
@@ -67,7 +67,7 @@ Expected behavior:
 - Selecting a deeper folder reveals another level.
 - Ancestor levels remain represented as the user moves deeper.
 - The selected path is visually clear.
-- Selecting an earlier ancestor updates the levels to its right.
+- Selecting an earlier ancestor updates the navigation levels beyond it.
 - The user can scroll or resize columns when the hierarchy exceeds the available space.
 
 The visible column chain represents the path from the browsing root to the active folder. Sibling folders remain available in their parent column; they do not each create their own column.
@@ -215,7 +215,7 @@ These references are research material, not dependencies. F-2 does not need to i
 
 ## 8. Technical Direction — Selected for Prototype
 
-No framework, language, UI toolkit, or filesystem library has been selected by this design.
+A prototype stack has been selected (§8.1). The criteria below describe the capabilities the stack must satisfy and the conditions that would justify revisiting the decision.
 
 Before implementation, compare suitable Windows desktop approaches against the project's actual needs. The selected approach should be evaluated against these criteria:
 
@@ -240,7 +240,7 @@ This is a Windows-only project, and the priorities are balanced performance, mai
 
 Use **.NET 10 LTS** as the prototype target rather than copying SPAN Finder's current .NET 8 target. As of this decision (2026-11-16), .NET 8 reached end of support on 2026-11-10, while .NET 10 LTS is supported through 2028-11-14. .NET 11 is newer but is a Standard Term Support release; .NET 10 LTS is the more conservative baseline for this project. Microsoft's current WinUI documentation lists C# with .NET 8 or later as supported.
 
-Use the latest stable Windows App SDK available when the prototype is scaffolded, then record the exact SDK and Windows SDK versions in the implementation record. Microsoft's November 2026 developer documentation lists Windows App SDK 2.6.5 as the latest stable release. Do not pin a version here before validating the actual project template, controls, deployment model, and package compatibility.
+At the time of this design revision (November 2026), Microsoft's developer documentation identified Windows App SDK 2.6.5 as the latest stable release. Treat that as a dated reference, not a version pin: confirm the latest stable release and its compatibility with the actual project template, controls, deployment model, and package configuration when scaffolding. Record the exact Windows App SDK and Windows SDK versions selected.
 
 **Prior-art reference:** SPAN Finder is a close implementation reference for WinUI 3 file browsing and Miller Columns. Its published project configuration uses .NET 8 and Windows App SDK 1.8, and its feature reference documents MVVM, asynchronous directory loading, cancellation, and multiple folder views. Treat it as evidence that this UI approach is practical—not as a dependency or a version template. Its .NET 8 target is now out of support, and its GPL-3.0 license means its source must not be copied into F-2 without a deliberate license review.
 
@@ -261,13 +261,14 @@ References:
 
 ### 8.2 Architecture boundaries for the prototype
 
-Keep three responsibilities separate:
+Keep four responsibilities separate:
 
-1. **Filesystem service:** enumerate immediate children of a directory, return stable path-based entries and metadata needed by the views, report recoverable errors, and honor cancellation.
-2. **Shared navigation state:** own the browsing root, active folder path, focus, selection, expanded-folder set, and navigation history. Derive the Miller column chain from this state.
-3. **Presentation:** render tree and horizontal Miller views from the same state. Store view-specific scroll and column sizing separately; presentation changes must not mutate navigation state.
+1. **Filesystem service:** enumerate immediate children of a directory, return stable path-based entries and metadata needed by the views, report recoverable errors, and honor cancellation. Provide the underlying filesystem operations used by navigation and document I/O.
+2. **Shared navigation state:** own the browsing root, active folder path, focus, selection, expanded-folder set, and navigation history. Derive the Miller column chain from this state. The editor must not own or redefine the file browser's active folder path.
+3. **Document/buffer service:** own open document buffers, per-buffer content, associated file paths, dirty state, and save/close lifecycle. Coordinate document loading, saving, external-change detection, and unsaved-change protection. Expose clear open, save, and close operations with change notifications. Keep document state independent of navigation state.
+4. **Presentation:** render the tree, horizontal Miller view, and integrated editor from their respective state models. Store view-specific scroll positions, column sizing, and other presentation details separately. Presentation changes must not silently mutate navigation or document state.
 
-Do not make either view the owner of filesystem navigation state. The editor must not own or redefine the file browser's active folder path. Keep document buffers and save state separate from navigation state.
+Neither browser presentation should own filesystem navigation state, and neither the editor nor its buffers should become a second source of truth for the active browsing location.
 
 ### 8.3 Integrated editing direction
 
@@ -321,6 +322,7 @@ The first candidate is a focused navigation-and-editing prototype, not a complet
 13. Open more than one text-file buffer and switch between them.
 14. Track unsaved changes and protect them when closing a buffer or the application.
 15. Detect an external file modification before saving over a changed on-disk version.
+16. Avoid silently changing the encoding or line-ending convention of supported text files during ordinary open/edit/save operations. Surface unsupported or ambiguous formats rather than silently rewriting them.
 
 ### 9.2 Explicitly excluded
 
@@ -334,14 +336,23 @@ Build the smallest useful verification set after inspecting the scaffold and ava
 - **Filesystem-service tests:** immediate-child enumeration, empty folders, inaccessible or removed paths, cancellation, and late-result/stale-request protection. Use isolated temporary directories where practical.
 - **UI smoke checks:** open a chosen folder, navigate several levels, switch tree/columns repeatedly, return to an ancestor, and verify focus/selection behavior.
 - **Responsiveness check:** exercise a representative large directory and observe whether input remains responsive and entries appear without waiting for a full recursive scan. Record the test conditions; do not claim a performance threshold until it has been measured.
-- **Editor/document tests:** opening a text file loads the expected content; editing marks the buffer dirty; saving writes the expected bytes/content; closing a dirty buffer requires an explicit decision; switching buffers preserves each buffer's content and dirty state; external modifications are detected before overwrite; unsupported/binary input is not silently saved as text.
-- **Text fidelity checks:** test common encodings and line-ending styles with small fixtures. Verify that an unchanged open/save round trip does not unnecessarily rewrite the file's encoding or newline convention where preservation is supported. Document any limitations.
+- **Editor/document tests:** establish the basic open/edit/save/switch lifecycle; verify that opening loads expected content, editing marks the buffer dirty, saving writes the expected content, closing a dirty buffer requires an explicit decision, switching buffers preserves each buffer's content and dirty state, external modifications are detected before overwrite, and unsupported/binary input is not silently saved as text. These checks prove the intended prototype loop; they do not establish comprehensive editor compatibility.
+- **Basic text-safety checks:** use a small number of representative fixtures to verify that the supported baseline text format can be opened, edited, and saved without silent encoding or line-ending conversion. Defer a broader encoding and newline compatibility matrix until after the first prototype. Record limitations and formats not supported.
 
 Do not choose or add a separate test framework before inspecting the actual project scaffold. Record commands and results only after they have been run on the candidate.
 
 ### 9.4 Prototype completion gate
 
-The prototype is successful when both navigation views remain consistent projections of the same navigation state, mode changes do not silently discard valid state, filesystem enumeration does not block navigation or allow stale results to overwrite current content, and a user can open, edit, save, and switch between ordinary text-file buffers without losing browser context or silently overwriting external changes. If any of these fail, fix the shared model, filesystem boundary, or document lifecycle before expanding scope.
+The prototype is successful when:
+
+- Both navigation views remain consistent projections of the same shared navigation state.
+- Switching presentations does not silently discard valid navigation state.
+- Filesystem enumeration remains responsive and stale results cannot overwrite the current location.
+- A user can open, edit, save, and switch between ordinary text-file buffers without losing browser context.
+- Unsaved changes are protected, and external modifications are detected before overwriting.
+- The supported baseline text format can be saved without silent encoding or line-ending corruption.
+
+The gate establishes the core navigation and editing workflows, not comprehensive file-manager or text-editor compatibility. Broader encoding compatibility, advanced editor features, and vertical Miller layout remain future work.
 
 ## 10. Acceptance Criteria for the Core Experience
 
@@ -357,7 +368,7 @@ The first usable version should demonstrate all of the following:
 - [ ] Switching modes does not discard expanded branches merely because the destination view cannot display them.
 - [ ] Valid selection and focus state are preserved or reconciled predictably across mode changes.
 - [ ] Horizontal tree and horizontal Miller layouts are usable.
-- [ ] The shared model supports adding vertical arrangements without creating a separate navigation engine.
+- [ ] The shared navigation model can support future vertical arrangements without requiring a separate navigation engine. This is a model-design requirement, not a requirement to implement a vertical Miller view in the prototype.
 - [ ] Expanding a folder in a large directory keeps the interface responsive.
 - [ ] Loading, partial results, cancellation, and inaccessible-folder errors are handled visibly and safely.
 - [ ] Long paths and changing or removed filesystem entries are handled gracefully.
@@ -379,6 +390,27 @@ Use the project's adopted [Development State Machine Workflow](https://github.co
 
 The project should establish its implementation baseline, technology choices, test approach, and maintenance record when implementation begins. Until then, keep design decisions and open questions here rather than inventing implementation status.
 
+### Workflow adoption and project-specific application
+
+F-2 initially adopted **Development State Machine Workflow v1.9.2**. This records the version used when the project adopted the workflow; it is not a permanent historical pin. Follow the current canonical workflow at the linked Meta-Modules path by default unless a deliberate deviation is recorded here.
+
+Apply the workflow proportionately:
+
+- **S1–S3 — Design and readiness:** maintain this README as the single canonical design; define observable acceptance checks; resolve scope and architecture contradictions before implementation; identify the current accepted baseline and the exact repository branch before writing.
+- **S4 — Implementation:** create a scoped scaffold/candidate on the existing branch, preserve the baseline, and assign a separate SemVer sequence to the application code/build artifact. Record exact .NET SDK, Windows App SDK, Windows SDK, project template, and deployment configuration actually selected.
+- **S5–S7 — Review, verification, and acceptance:** inspect the candidate diff; run the applicable tests and build/runtime checks; record PASS, FAIL, BLOCKED, or NOT RUN against the exact candidate. Do not treat a scaffold build as proof of navigation or editor behavior.
+- **S8–S10 — Repair, maintenance, and next decision:** preserve failed candidate evidence, repair in a new code version, and update a single canonical maintenance record only after the agreed acceptance gate passes.
+- **Pause/resume:** use the workflow's §10 checkpoint procedure and the [Context Continuity module](https://github.com/KRMRGold/Meta-Modules/blob/main/modules/context-continuity.md). Update this design or the future maintenance/test record that best fits the state; do not create per-session checkpoint files.
+
+Load these supporting Meta-Modules at the corresponding development stages rather than duplicating their procedures here:
+
+- [Testing and Verification](https://github.com/KRMRGold/Meta-Modules/blob/main/modules/testing-and-verification.md) — derive the behavior-to-test map, choose the smallest useful test layers, and record actual execution evidence.
+- [Code Review and Change Assurance](https://github.com/KRMRGold/Meta-Modules/blob/main/modules/code-review-and-change-assurance.md) — review candidate diffs, data flow, architecture, scope, failure behavior, and security findings before acceptance.
+- [Cybersecurity and Secure Engineering](https://github.com/KRMRGold/Meta-Modules/blob/main/modules/cybersecurity-and-secure-engineering.md) — threat-model filesystem access, untrusted filenames/content, path and symbolic-link handling, file writes, dependency provenance, and application boundaries before implementation.
+- [Sandboxing and Safe Execution](https://github.com/KRMRGold/Meta-Modules/blob/main/modules/sandboxing-and-safe-execution.md) — classify and constrain commands, generated code, dependency installation, and test execution before running them.
+
+These are stage-specific supporting modules, not additional workflow versions or permanent pins. Retrieve their current canonical contents when the relevant stage begins.
+
 ### Current state
 
 - **Design:** Refined initial design; shared navigation semantics and performance constraints documented.
@@ -386,4 +418,5 @@ The project should establish its implementation baseline, technology choices, te
 - **Tests:** None established or run.
 - **Technology choice:** WinUI 3 + C# + .NET 10 LTS selected for the prototype; exact Windows App SDK version to be confirmed when scaffolding.
 - **Prototype scope:** Navigation plus basic integrated text editing defined in §9; implementation has not started.
-- **Next step:** Inspect the available Windows development environment, scaffold the smallest WinUI 3 app on the existing repository branch, and establish the initial test approach before implementing the shared navigation model.
+- **Workflow phase:** S2 — Design refinement. The design is being tightened before the implementation-readiness gate; implementation has not begun.
+- **Next step:** Complete the agreed design refinements, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
