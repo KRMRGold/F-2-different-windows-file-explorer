@@ -229,7 +229,7 @@ Evaluate the selected stack against these criteria as the prototype is built. Re
 - **Safety boundary:** browsing and previewing must not execute files. Opening a file is a separate, explicit user action handled through a clear platform boundary.
 - **Maintainability:** the simplest approach that meets the requirements, with a testable separation between filesystem operations, shared navigation state, document buffers, and presentation.
 
-Do not add a dependency merely because a reference project uses it. Compare candidate approaches against these criteria before selecting a stack, and explain meaningful trade-offs.
+Do not add a dependency merely because a reference project uses it. Keep the selected stack minimal; introduce a dependency only when it materially helps satisfy these criteria, and explain the trade-off.
 
 
 ### 8.1 Technology decision
