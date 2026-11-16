@@ -1,7 +1,7 @@
 # F-2 — Different Windows File Explorer
 
 > **Project status:** Initial design / pre-implementation  
-> **Design version:** 0.3.0  
+> **Design version:** 0.4.0  
 > **Target platform:** Windows  
 > **Development workflow:** [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md), initially adopted at **v1.9.2**  
 > **Implementation status:** No application implementation has been established by this document.
@@ -227,7 +227,7 @@ Before implementation, compare suitable Windows desktop approaches against the p
 - **Windows integration:** native filesystem behavior and platform integration where useful, without coupling the design unnecessarily to one framework.
 - **Dependency hygiene:** minimal, maintained, auditable dependencies. Review provenance, license compatibility, update history, permissions, and security implications before adoption.
 - **Safety boundary:** browsing and previewing must not execute files. Opening a file is a separate, explicit user action handled through a clear platform boundary.
-- **Maintainability:** the simplest approach that meets the requirements, with a testable separation between filesystem operations, shared navigation state, and presentation.
+- **Maintainability:** the simplest approach that meets the requirements, with a testable separation between filesystem operations, shared navigation state, document buffers, and presentation.
 
 Do not add a dependency merely because a reference project uses it. Compare candidate approaches against these criteria before selecting a stack, and explain meaningful trade-offs.
 
@@ -267,12 +267,42 @@ Keep three responsibilities separate:
 2. **Shared navigation state:** own the browsing root, active folder path, focus, selection, expanded-folder set, and navigation history. Derive the Miller column chain from this state.
 3. **Presentation:** render tree and horizontal Miller views from the same state. Store view-specific scroll and column sizing separately; presentation changes must not mutate navigation state.
 
-Do not make either view the owner of filesystem navigation state. Avoid adding a database, indexing service, file-operation engine, shell extension layer, or third-party file-manager dependency to prove this design.
+Do not make either view the owner of filesystem navigation state. The editor must not own or redefine the file browser's active folder path. Keep document buffers and save state separate from navigation state.
+
+### 8.3 Integrated editing direction
+
+F-2 also includes a lightweight, Emacs-inspired text-editing workspace inside the same application window. The intent is to make browsing and editing parts of one continuous workflow—not to build a full IDE or reproduce all of Emacs.
+
+**Initial editing model:**
+- Opening a supported text file creates or focuses a document buffer in the editor area.
+- Keep the file browser available alongside the editor, with a layout that can be resized or temporarily collapsed.
+- Opening a file must not discard the current browsing location, tree expansions, or column context.
+- Support multiple open buffers in the initial design, with a clear way to switch between them.
+- Track whether each buffer has unsaved changes and identify the associated file path.
+- Provide basic text editing, selection, clipboard operations, undo/redo, and save.
+- Provide an explicit close action and protect unsaved changes with a clear save/discard/cancel decision.
+- Opening a file is an explicit action; merely selecting or previewing a file must not execute it or launch an associated application.
+- Initially support ordinary text files only. Treat binary, very large, or unsupported files as non-editable and explain why rather than interpreting arbitrary bytes as text.
+- Preserve line endings and encoding where practical; detect and report unsupported or ambiguous encodings rather than silently corrupting content.
+- Detect when a file changes externally after it was opened. Before overwriting an externally changed file, surface the conflict and let the user decide how to proceed.
+- Saving writes to the original file path. Save As can be considered after the basic open/edit/save path is reliable.
+
+**Emacs-inspired, but not Emacs scope:** buffers, keyboard-oriented navigation, direct file opening, and keeping multiple pieces of work available are the useful concepts. A Lisp environment, extensible command system, packages, macros, terminals, language servers, and full Emacs keybinding compatibility are not part of the initial target.
+
+**WinUI control note:** Microsoft's WinUI guidance distinguishes a plain multiline `TextBox` for plain text from `RichEditBox` for formatted documents. Start by evaluating `TextBox` for the plain-text editing prototype; do not choose `RichEditBox` just because its name sounds more capable. Validate large-file behavior, undo/redo, keyboard handling, and encoding/newline preservation before committing to the editor control.
+
+References:
+- [Microsoft — TextBox](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.textbox)
+- [Microsoft — RichEditBox](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.controls.richeditbox)
+- [GNU Emacs — Buffers](https://www.gnu.org/software/emacs/manual/html_node/emacs/Buffers.html)
+- [GNU Emacs — Visiting Files](https://www.gnu.org/software/emacs/manual/html_node/emacs/Visiting.html)
+
+Avoid adding a database, indexing service, file-operation engine, shell extension layer, or third-party file-manager dependency to prove the navigation and editing design.
 
 
 ## 9. Prototype Scope and Verification
 
-The first candidate is a focused navigation prototype, not a complete file manager.
+The first candidate is a focused navigation-and-editing prototype, not a complete file manager or IDE.
 
 ### 9.1 Included
 
@@ -285,10 +315,16 @@ The first candidate is a focused navigation prototype, not a complete file manag
 7. Load directory contents on demand, asynchronously, and with cancellation.
 8. Prevent stale enumeration results from replacing the contents of a newer active location.
 9. Show loading and recoverable access/error states without losing the last valid navigation context.
+10. Open a supported text file inside the same application window.
+11. Edit and save the text file at its original path.
+12. Keep the browser's navigation context intact while editing.
+13. Open more than one text-file buffer and switch between them.
+14. Track unsaved changes and protect them when closing a buffer or the application.
+15. Detect an external file modification before saving over a changed on-disk version.
 
 ### 9.2 Explicitly excluded
 
-Do not add copy/move/delete/rename operations, previews, thumbnails, tabs, search, bookmarks, remote filesystems, cloud-provider integration, shell context menus, custom file icons, or vertical Miller layout to this prototype. These features would obscure whether the shared navigation architecture works.
+Do not add copy/move/delete/rename operations, previews, thumbnails, search, bookmarks, remote filesystems, cloud-provider integration, shell context menus, custom file icons, syntax highlighting, language servers, terminal integration, plugin systems, or vertical Miller layout to this prototype. Multiple document buffers are in scope, but full workspace/session persistence and advanced editor features are not. These features would obscure whether the shared navigation and editing foundations work.
 
 ### 9.3 Verification plan
 
@@ -298,12 +334,14 @@ Build the smallest useful verification set after inspecting the scaffold and ava
 - **Filesystem-service tests:** immediate-child enumeration, empty folders, inaccessible or removed paths, cancellation, and late-result/stale-request protection. Use isolated temporary directories where practical.
 - **UI smoke checks:** open a chosen folder, navigate several levels, switch tree/columns repeatedly, return to an ancestor, and verify focus/selection behavior.
 - **Responsiveness check:** exercise a representative large directory and observe whether input remains responsive and entries appear without waiting for a full recursive scan. Record the test conditions; do not claim a performance threshold until it has been measured.
+- **Editor/document tests:** opening a text file loads the expected content; editing marks the buffer dirty; saving writes the expected bytes/content; closing a dirty buffer requires an explicit decision; switching buffers preserves each buffer's content and dirty state; external modifications are detected before overwrite; unsupported/binary input is not silently saved as text.
+- **Text fidelity checks:** test common encodings and line-ending styles with small fixtures. Verify that an unchanged open/save round trip does not unnecessarily rewrite the file's encoding or newline convention where preservation is supported. Document any limitations.
 
 Do not choose or add a separate test framework before inspecting the actual project scaffold. Record commands and results only after they have been run on the candidate.
 
 ### 9.4 Prototype completion gate
 
-The prototype is successful when both views remain consistent projections of the same navigation state, mode changes do not silently discard valid state, and filesystem enumeration does not block navigation or allow stale results to overwrite current content. If any of these fail, fix the shared model or filesystem boundary before expanding scope.
+The prototype is successful when both navigation views remain consistent projections of the same navigation state, mode changes do not silently discard valid state, filesystem enumeration does not block navigation or allow stale results to overwrite current content, and a user can open, edit, save, and switch between ordinary text-file buffers without losing browser context or silently overwriting external changes. If any of these fail, fix the shared model, filesystem boundary, or document lifecycle before expanding scope.
 
 ## 10. Acceptance Criteria for the Core Experience
 
@@ -324,6 +362,14 @@ The first usable version should demonstrate all of the following:
 - [ ] Loading, partial results, cancellation, and inaccessible-folder errors are handled visibly and safely.
 - [ ] Long paths and changing or removed filesystem entries are handled gracefully.
 - [ ] Navigation does not depend on downloading or executing third-party file-manager projects.
+- [ ] A supported text file can be opened inside the F-2 window.
+- [ ] The browser remains available while a document is being edited.
+- [ ] Opening a document does not change the active folder path or discard navigation context.
+- [ ] Multiple document buffers can remain open and be switched between.
+- [ ] Unsaved changes are clearly indicated and protected when closing a buffer.
+- [ ] Saving writes to the intended file path and reports failures without losing the buffer's content.
+- [ ] External modifications are detected before an overwrite.
+- [ ] Unsupported or binary files are not silently treated as editable text.
 
 These criteria describe intended behavior. They are not evidence that any feature has been implemented or tested. Vertical Miller layout has a design direction but remains a later implementation target, not a first-release acceptance requirement.
 
@@ -339,5 +385,5 @@ The project should establish its implementation baseline, technology choices, te
 - **Implementation:** Not started / not verified.
 - **Tests:** None established or run.
 - **Technology choice:** WinUI 3 + C# + .NET 10 LTS selected for the prototype; exact Windows App SDK version to be confirmed when scaffolding.
-- **Prototype scope:** Defined in §9; implementation has not started.
+- **Prototype scope:** Navigation plus basic integrated text editing defined in §9; implementation has not started.
 - **Next step:** Inspect the available Windows development environment, scaffold the smallest WinUI 3 app on the existing repository branch, and establish the initial test approach before implementing the shared navigation model.
