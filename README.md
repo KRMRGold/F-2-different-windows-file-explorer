@@ -217,7 +217,7 @@ These references are research material, not dependencies. F-2 does not need to i
 
 A prototype stack has been selected (§8.1). The criteria below describe the capabilities the stack must satisfy and the conditions that would justify revisiting the decision.
 
-Before implementation, compare suitable Windows desktop approaches against the project's actual needs. The selected approach should be evaluated against these criteria:
+Evaluate the selected stack against these criteria as the prototype is built. Reconsider alternatives only if evidence reveals a material mismatch:
 
 - **Filesystem access:** reliable enumeration and navigation; asynchronous operations; cancellation; recoverable handling of inaccessible, removed, or changing paths.
 - **Large-directory rendering:** support for incremental updates and list virtualization; no full-directory UI construction or blocking filesystem work on the UI thread.
