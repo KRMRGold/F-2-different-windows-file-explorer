@@ -1,7 +1,7 @@
 # F-2 — Different Windows File Explorer
 
 > **Project status:** Initial design / pre-implementation  
-> **Design version:** 0.2.0  
+> **Design version:** 0.3.0  
 > **Target platform:** Windows  
 > **Development workflow:** [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md), initially adopted at **v1.9.2**  
 > **Implementation status:** No application implementation has been established by this document.
@@ -213,7 +213,7 @@ F-2 should learn from established implementations while keeping its own implemen
 
 These references are research material, not dependencies. F-2 does not need to install or incorporate their code to learn from the interaction patterns. If code is ever considered for reuse, inspect its provenance, license, dependencies, and security implications first.
 
-## 8. Technical Direction — Not Yet Selected
+## 8. Technical Direction — Selected for Prototype
 
 No framework, language, UI toolkit, or filesystem library has been selected by this design.
 
@@ -231,7 +231,81 @@ Before implementation, compare suitable Windows desktop approaches against the p
 
 Do not add a dependency merely because a reference project uses it. Compare candidate approaches against these criteria before selecting a stack, and explain meaningful trade-offs.
 
-## 9. Acceptance Criteria for the Core Experience
+
+### 8.1 Technology decision
+
+**Selected prototype stack: WinUI 3 + C# + .NET 10 LTS + Windows App SDK.**
+
+This is a Windows-only project, and the priorities are balanced performance, maintainability, and good Windows integration. WinUI 3 is Microsoft's recommended native UI framework for new Windows desktop applications. C#/.NET offers a practical application architecture and direct access to Windows APIs without introducing a separate web frontend and native backend.
+
+Use **.NET 10 LTS** as the prototype target rather than copying SPAN Finder's current .NET 8 target. As of this decision (2026-11-16), .NET 8 reached end of support on 2026-11-10, while .NET 10 LTS is supported through 2028-11-14. .NET 11 is newer but is a Standard Term Support release; .NET 10 LTS is the more conservative baseline for this project. Microsoft's current WinUI documentation lists C# with .NET 8 or later as supported.
+
+Use the latest stable Windows App SDK available when the prototype is scaffolded, then record the exact SDK and Windows SDK versions in the implementation record. Microsoft's November 2026 developer documentation lists Windows App SDK 2.6.5 as the latest stable release. Do not pin a version here before validating the actual project template, controls, deployment model, and package compatibility.
+
+**Prior-art reference:** SPAN Finder is a close implementation reference for WinUI 3 file browsing and Miller Columns. Its published project configuration uses .NET 8 and Windows App SDK 1.8, and its feature reference documents MVVM, asynchronous directory loading, cancellation, and multiple folder views. Treat it as evidence that this UI approach is practical—not as a dependency or a version template. Its .NET 8 target is now out of support, and its GPL-3.0 license means its source must not be copied into F-2 without a deliberate license review.
+
+**Alternatives retained for comparison, not active candidates:**
+- **Qt 6:** strong model/view architecture and filesystem model; reconsider only if the WinUI prototype reveals a concrete limitation that outweighs C++ and Qt deployment/licensing costs.
+- **Avalonia:** capable .NET UI framework, but cross-platform support is not a current requirement.
+- **Tauri:** credible Rust + web UI approach, demonstrated by Dirwise, but adds a frontend/native boundary that provides little value for this Windows-only prototype.
+
+This is a **prototype technology decision**, not a claim that performance, accessibility, or deployment suitability has already been proven. Revisit it only if the prototype produces specific evidence against the criteria in this section.
+
+References:
+- [Microsoft — WinUI 3](https://learn.microsoft.com/en-us/windows/apps/winui)
+- [Microsoft — Windows app development](https://learn.microsoft.com/en-us/windows/apps/)
+- [Microsoft — .NET support policy](https://dotnet.microsoft.com/en-us/platform/support/policy)
+- [Microsoft — Windows developer updates](https://learn.microsoft.com/en-us/windows/apps/whats-new/whats-new-for-developers)
+- [SPAN Finder source repository](https://github.com/LumiBearStudio/SpanFinder)
+- [Dirwise source repository](https://github.com/arcly-studio/dirwise)
+
+### 8.2 Architecture boundaries for the prototype
+
+Keep three responsibilities separate:
+
+1. **Filesystem service:** enumerate immediate children of a directory, return stable path-based entries and metadata needed by the views, report recoverable errors, and honor cancellation.
+2. **Shared navigation state:** own the browsing root, active folder path, focus, selection, expanded-folder set, and navigation history. Derive the Miller column chain from this state.
+3. **Presentation:** render tree and horizontal Miller views from the same state. Store view-specific scroll and column sizing separately; presentation changes must not mutate navigation state.
+
+Do not make either view the owner of filesystem navigation state. Avoid adding a database, indexing service, file-operation engine, shell extension layer, or third-party file-manager dependency to prove this design.
+
+
+## 9. Prototype Scope and Verification
+
+The first candidate is a focused navigation prototype, not a complete file manager.
+
+### 9.1 Included
+
+1. Start at a user-selected ordinary filesystem directory.
+2. Enumerate that directory's immediate children and display folders and files.
+3. Provide an expand-in-place tree presentation.
+4. Provide horizontal Miller Columns, where selecting a folder reveals its contents in the next column.
+5. Drive both presentations from one shared navigation state.
+6. Preserve the active path, valid focus/selection, and hidden tree expansion state when switching presentations.
+7. Load directory contents on demand, asynchronously, and with cancellation.
+8. Prevent stale enumeration results from replacing the contents of a newer active location.
+9. Show loading and recoverable access/error states without losing the last valid navigation context.
+
+### 9.2 Explicitly excluded
+
+Do not add copy/move/delete/rename operations, previews, thumbnails, tabs, search, bookmarks, remote filesystems, cloud-provider integration, shell context menus, custom file icons, or vertical Miller layout to this prototype. These features would obscure whether the shared navigation architecture works.
+
+### 9.3 Verification plan
+
+Build the smallest useful verification set after inspecting the scaffold and available test tooling:
+
+- **Navigation-state tests:** active path remains authoritative; column levels derive from the root-to-active path; switching views retains expanded branches; focus and selection are reconciled by path; presentation changes do not mutate navigation state.
+- **Filesystem-service tests:** immediate-child enumeration, empty folders, inaccessible or removed paths, cancellation, and late-result/stale-request protection. Use isolated temporary directories where practical.
+- **UI smoke checks:** open a chosen folder, navigate several levels, switch tree/columns repeatedly, return to an ancestor, and verify focus/selection behavior.
+- **Responsiveness check:** exercise a representative large directory and observe whether input remains responsive and entries appear without waiting for a full recursive scan. Record the test conditions; do not claim a performance threshold until it has been measured.
+
+Do not choose or add a separate test framework before inspecting the actual project scaffold. Record commands and results only after they have been run on the candidate.
+
+### 9.4 Prototype completion gate
+
+The prototype is successful when both views remain consistent projections of the same navigation state, mode changes do not silently discard valid state, and filesystem enumeration does not block navigation or allow stale results to overwrite current content. If any of these fail, fix the shared model or filesystem boundary before expanding scope.
+
+## 10. Acceptance Criteria for the Core Experience
 
 The first usable version should demonstrate all of the following:
 
@@ -253,7 +327,7 @@ The first usable version should demonstrate all of the following:
 
 These criteria describe intended behavior. They are not evidence that any feature has been implemented or tested. Vertical Miller layout has a design direction but remains a later implementation target, not a first-release acceptance requirement.
 
-## 10. Development and Change Record
+## 11. Development and Change Record
 
 Use the project's adopted [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md) for substantial implementation work. Keep this README as the canonical living design document and update it in place. Use Git history for prior revisions; do not create version-suffixed copies.
 
@@ -264,5 +338,6 @@ The project should establish its implementation baseline, technology choices, te
 - **Design:** Refined initial design; shared navigation semantics and performance constraints documented.
 - **Implementation:** Not started / not verified.
 - **Tests:** None established or run.
-- **Technology choice:** Open; evaluate candidates against §8.
-- **Next step:** Compare suitable Windows desktop approaches against §8, then select a small prototype scope for the shared navigation model and the two initial horizontal presentations.
+- **Technology choice:** WinUI 3 + C# + .NET 10 LTS selected for the prototype; exact Windows App SDK version to be confirmed when scaffolding.
+- **Prototype scope:** Defined in §9; implementation has not started.
+- **Next step:** Inspect the available Windows development environment, scaffold the smallest WinUI 3 app on the existing repository branch, and establish the initial test approach before implementing the shared navigation model.
