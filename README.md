@@ -1,7 +1,7 @@
 # F-2 — Different Windows File Explorer
 
 > **Project status:** Initial design / pre-implementation  
-> **Design version:** 0.5.0  
+> **Design version:** 0.6.1  
 > **Target platform:** Windows  
 > **Development workflow:** [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md), initially adopted at **v1.9.2**  
 > **Implementation status:** No application implementation has been established by this document.
@@ -80,11 +80,12 @@ Both presentations must be projections of one navigation model. They must not ma
 
 The model should distinguish these concepts:
 
-- **Browsing root:** the directory from which this browsing context begins. It may be a chosen folder, drive, or other supported filesystem location.
+- **Browsing root:** the directory from which this browsing context begins. It may be a chosen folder, drive, or other supported filesystem location. It is a navigation origin, not automatically a security boundary.
 - **Active folder path:** the folder whose contents are currently being explored. This is the authoritative navigation location.
 - **Focused item:** the item receiving keyboard focus.
 - **Selected items:** the item or items selected for file-browser actions. Focus and selection are related but not necessarily identical.
-- **Expanded-folder set:** folders the user has explicitly expanded in tree mode or otherwise chosen to keep expanded during the current browsing session.
+- **Expanded-folder set:** folders the user has explicitly expanded in tree mode or otherwise chosen to keep expanded during the current browsing session. This records user intent, not temporary expansions required to reveal the active path.
+- **Collapsed-folder overrides:** folders the user has explicitly collapsed during the current browsing session, including ancestors that would otherwise be expanded to reveal the active path. These overrides prevent automatic path-reveal behavior from immediately undoing an intentional collapse.
 - **Navigation history:** prior active folder paths for back and forward navigation.
 - **Per-view presentation state:** view-specific details such as scroll positions and column widths. These do not redefine the filesystem location.
 
@@ -92,11 +93,12 @@ The model should distinguish these concepts:
 
 1. **Active folder path is authoritative.** Switching modes never changes it.
 2. **Columns are derived from the active path.** The visible column chain is the browsing root and each successive ancestor leading to the active folder. The final level displays the active folder's contents.
-3. **Tree mode reveals the active path.** On switching to tree mode, the ancestor chain to the active folder is expanded so the active location is reachable and visible.
-4. **Additional tree expansions are retained.** Switching to columns may hide expanded sibling branches because columns show one path at a time. Those branches remain in the expansion set and reappear when returning to tree mode, provided the folders still exist and remain accessible.
+3. **Tree mode reveals the active path where possible.** On switching to tree mode, the ancestor chain to the active folder is made reachable and visible unless a user-created collapsed-folder override intentionally hides part of that chain. The active folder remains authoritative even when its path is temporarily not expanded in the tree.
+4. **Additional tree expansions are retained.** Switching to columns may hide expanded sibling branches because columns show one path at a time. Those branches remain in the expansion set and reappear when returning to tree mode, provided the folders still exist and remain accessible. Explicit collapse overrides are retained separately and take precedence over automatic path revelation.
 5. **Selection is preserved by item identity/path where possible.** If the focused or selected item is not visible in the destination view, retain its state without forcing the destination view to jump unexpectedly. If the item no longer exists or is no longer accessible, clear or reconcile that item and provide an understandable result.
 6. **A view does not mutate hidden state.** A branch being invisible in columns does not mean it was collapsed in the shared model.
-7. **User navigation is an intentional state change.** Selecting a different folder, changing the active path, or explicitly collapsing a branch may update the shared model. Merely switching presentation or orientation must not.
+7. **User navigation is an intentional state change.** Activating a different folder, changing the active path, or explicitly expanding/collapsing a branch may update the shared model. Merely switching presentation or orientation must not.
+8. **Selection is not activation.** Focus, selection, activation, and active-folder location are separate concepts. A pointer or keyboard action may change focus or selection without changing the active folder unless the interaction is defined as activation for that presentation. Multi-selection must never implicitly activate every selected folder.
 
 | State | Tree presentation | Miller Columns presentation | Switching rule |
 |---|---|---|---|
@@ -105,10 +107,27 @@ The model should distinguish these concepts:
 | Focused item | Focus shown in the relevant listing | Focus shown in the relevant column | Preserve by path when possible; do not force-scroll to hidden focus |
 | Selected items | Selection shown wherever those items are visible | Selection shown if represented in the visible path/column | Retain valid selection even if temporarily not visible |
 | Expanded-folder set | Multiple expanded branches can be shown | Only the active ancestor chain is shown | Retain branches hidden by column mode |
+| Collapsed-folder overrides | Explicitly collapsed branches remain collapsed, including active-path ancestors | Not represented as expanded branches | Retain until explicitly expanded or session state is reset |
 | Scroll positions | Tree scroll position | Per-column scroll positions | May be stored per view; restore when returning to that view |
 | Navigation history | Back/forward through active paths | Same history | Shared |
 
 If an item disappears, moves, or becomes inaccessible while F-2 is open, reconcile the state against the filesystem rather than treating stale paths as guaranteed to exist.
+
+#### Focus, selection, activation, and active folder
+
+These are separate state concepts and must not be conflated:
+
+- **Focus** identifies the item that receives keyboard input.
+- **Selection** identifies one or more items selected for a subsequent operation. Multi-selection is allowed where the presentation supports it.
+- **Activation** is an intentional command on one item, such as Enter or double-click, or the equivalent explicit interaction defined by the view.
+- **Active folder** is the single directory whose contents define the current navigation location.
+
+Presentation-specific interaction rules:
+
+- In **tree mode**, expanding or collapsing a folder changes expansion state only. It does not change the active folder. Activating a folder changes the active folder.
+- In **Miller Columns**, selecting a folder may focus/select it and reveal its contents in the next column, but only the focused/activated folder in the current navigation chain becomes the active folder. Multi-selecting sibling folders must not create multiple active paths. The implementation must choose and document whether pointer selection itself is the activation gesture or whether a separate activation gesture is required; whichever rule is chosen must be consistent with keyboard interaction and tested.
+- Selecting a file does not change the active folder. It changes focus/selection only.
+- Back/forward navigation and direct path navigation explicitly change the active folder.
 
 ## 4. Layout and Orientation
 
@@ -144,7 +163,7 @@ The following capabilities are useful to the overall design, but should be intro
 - A readable path or breadcrumb for orientation and direct navigation.
 - Back and forward navigation.
 - Keyboard navigation and common file-selection behavior.
-- Basic file operations using normal Windows filesystem behavior.
+- Basic file operations using normal Windows filesystem behavior are a later capability. Copy, move, delete, and rename are outside the initial prototype scope (§9.2).
 - A preview area for supported file types, if it can be added without making navigation cumbersome.
 - Resizable panes and columns.
 - Sensible handling of long names, hidden files, inaccessible folders, and large directories.
@@ -158,15 +177,18 @@ A large directory tree must not cause the interface to freeze or require F-2 to 
 Design requirements:
 
 - **On-demand enumeration:** read a folder's entries when that folder is first needed, not by recursively scanning every descendant in advance.
+- **Reparse-point policy:** make navigation through symbolic links, junctions, and other reparse points explicit. The user may intentionally navigate through a link, but F-2 must identify the resolved target where practical, detect cycles during any traversal, and avoid silently treating a link target as a child physically contained by the browsing root. The browsing root alone does not confine navigation. No recursive traversal is needed for the initial prototype.
 - **Lazy expansion:** expanding a folder requests that folder's contents. Deeper folders are not enumerated until they are themselves needed.
 - **Asynchronous work:** filesystem enumeration must not block the UI thread. Long-running requests should be cancellable when the user changes location or no longer needs the result.
 - **Incremental display:** show entries as they become available where practical, rather than waiting for an entire large listing before displaying anything.
-- **Virtualized rendering:** prefer a UI approach that can render large lists without creating a full UI element for every entry at once.
+- **Virtualized rendering:** prefer a UI approach that can render large lists without creating a full UI element for every entry at once. Verify the actual virtualization behavior of each selected control; lazy data loading is not the same as UI virtualization. WinUI 3's built-in `TreeView` is not virtualized, so it is a prototype candidate rather than an assumed solution for very large trees. Measure it against representative directories and evaluate a virtualized custom tree if it fails the responsiveness requirement.
 - **Visible status:** show loading, partial results, and recoverable errors clearly. An inaccessible folder should not freeze or invalidate the rest of the browsing context.
 - **Stale-result protection:** if the user navigates away while enumeration is in progress, late results must not overwrite the newer location's contents.
 - **No arbitrary hidden truncation:** if a practical limit is required, make it visible and provide a clear way to continue or refine the listing.
 
 Virtualization is a preferred capability to evaluate in the UI toolkit, not a reason to impose an arbitrary result cap. The implementation should be measured with representative large directories before performance claims are made.
+
+Filesystem enumeration and UI virtualization are separate concerns. Incremental enumeration can populate a collection progressively, but a control may still create one UI element per realized entry. The prototype must measure both data-loading responsiveness and rendering responsiveness. If a synchronous filesystem API is used on a background worker, cancellation may only be observed between filesystem calls; do not promise immediate interruption of an operating-system call already in progress.
 
 ## 6. Initial Scope
 
@@ -263,7 +285,7 @@ References:
 
 Keep four responsibilities separate:
 
-1. **Filesystem service:** enumerate immediate children of a directory, return stable path-based entries and metadata needed by the views, report recoverable errors, and honor cancellation. Provide the underlying filesystem operations used by navigation and document I/O.
+1. **Filesystem service:** enumerate immediate children of a directory, return stable path-based entries and metadata needed by the views, report recoverable errors, and honor cancellation. Provide the underlying filesystem operations used by navigation and document I/O. Define how reparse points are identified and how their targets are handled; do not assume the browsing root is a containment boundary.
 2. **Shared navigation state:** own the browsing root, active folder path, focus, selection, expanded-folder set, and navigation history. Derive the Miller column chain from this state. The editor must not own or redefine the file browser's active folder path.
 3. **Document/buffer service:** own open document buffers, per-buffer content, associated file paths, dirty state, and save/close lifecycle. Coordinate document loading, saving, external-change detection, and unsaved-change protection. Expose clear open, save, and close operations with change notifications. Keep document state independent of navigation state.
 4. **Presentation:** render the tree, horizontal Miller view, and integrated editor from their respective state models. Store view-specific scroll positions, column sizing, and other presentation details separately. Presentation changes must not silently mutate navigation or document state.
@@ -285,7 +307,10 @@ F-2 also includes a lightweight, Emacs-inspired text-editing workspace inside th
 - Opening a file is an explicit action; merely selecting or previewing a file must not execute it or launch an associated application.
 - Initially support ordinary text files only. Treat binary, very large, or unsupported files as non-editable and explain why rather than interpreting arbitrary bytes as text.
 - Preserve line endings and encoding where practical; detect and report unsupported or ambiguous encodings rather than silently corrupting content.
-- Detect when a file changes externally after it was opened. Before overwriting an externally changed file, surface the conflict and let the user decide how to proceed.
+- Define and test an initial supported text baseline before implementation: UTF-8 with and without BOM, and LF and CRLF line endings. Mixed line endings and other encodings must be detected and either preserved deliberately or reported as unsupported; never silently normalize them.
+- Establish a conservative maximum editable file size through prototype measurements. Files exceeding the supported limit must remain available to browse but must not be loaded into the editor as if they were ordinary small text files.
+- Saving should use a safe replacement strategy appropriate to Windows filesystem semantics. A failed or interrupted save must not silently destroy the prior on-disk file or the in-memory buffer.
+- Detect when a file changes externally after it was opened, including replacement of the file at the same path. Compare more than a timestamp where practical (for example, file identity and a content/version fingerprint). Before overwriting an externally changed file, surface the conflict and let the user decide how to proceed.
 - Saving writes to the original file path. Save As can be considered after the basic open/edit/save path is reliable.
 
 **Emacs-inspired, but not Emacs scope:** buffers, keyboard-oriented navigation, direct file opening, and keeping multiple pieces of work available are the useful concepts. A Lisp environment, extensible command system, packages, macros, terminals, language servers, and full Emacs keybinding compatibility are not part of the initial target.
@@ -337,7 +362,8 @@ Build the smallest useful verification set after inspecting the scaffold and ava
 - **UI smoke checks:** open a chosen folder, navigate several levels, switch tree/columns repeatedly, return to an ancestor, and verify focus/selection behavior.
 - **Responsiveness check:** exercise a representative large directory and observe whether input remains responsive and entries appear without waiting for a full recursive scan. Record the test conditions; do not claim a performance threshold until it has been measured.
 - **Editor/document tests:** establish the basic open/edit/save/switch lifecycle; verify that opening loads expected content, editing marks the buffer dirty, saving writes the expected content, closing a dirty buffer requires an explicit decision, switching buffers preserves each buffer's content and dirty state, external modifications are detected before overwrite, and unsupported/binary input is not silently saved as text. These checks prove the intended prototype loop; they do not establish comprehensive editor compatibility.
-- **Basic text-safety checks:** use a small number of representative fixtures to verify that the supported baseline text format can be opened, edited, and saved without silent encoding or line-ending conversion. Defer a broader encoding and newline compatibility matrix until after the first prototype. Record limitations and formats not supported.
+- **Basic text-safety checks:** use representative fixtures for UTF-8 with and without BOM and LF/CRLF line endings. Verify open/edit/save fidelity, explicit handling of mixed line endings and unsupported encodings, and safe behavior for oversized files. Defer a broader encoding and newline compatibility matrix until after the first prototype. Record limitations and formats not supported.
+- **Tree rendering check:** measure built-in WinUI `TreeView` with a representative large directory, separately from enumeration timing. If responsiveness or memory use is unacceptable, evaluate a virtualized custom tree before expanding scope.
 
 Do not choose or add a separate test framework before inspecting the actual project scaffold. Record commands and results only after they have been run on the candidate.
 
@@ -372,6 +398,10 @@ The first usable version should demonstrate all of the following:
 - [ ] Expanding a folder in a large directory keeps the interface responsive.
 - [ ] Loading, partial results, cancellation, and inaccessible-folder errors are handled visibly and safely.
 - [ ] Long paths and changing or removed filesystem entries are handled gracefully.
+- [ ] Symbolic links, junctions, and other reparse points have an explicit navigation policy; the browsing root is not mistakenly treated as a security boundary.
+- [ ] Focus, selection, activation, and active-folder changes behave consistently, including multi-selection.
+- [ ] Explicitly collapsed tree branches are not immediately reopened by automatic active-path revelation.
+- [ ] Tree enumeration and tree UI rendering are measured separately; the chosen tree control meets the prototype's responsiveness needs.
 - [ ] Navigation does not depend on downloading or executing third-party file-manager projects.
 - [ ] A supported text file can be opened inside the F-2 window.
 - [ ] The browser remains available while a document is being edited.
@@ -419,4 +449,4 @@ These are stage-specific supporting modules, not additional workflow versions or
 - **Technology choice:** WinUI 3 + C# + .NET 10 LTS selected for the prototype; exact Windows App SDK version to be confirmed when scaffolding.
 - **Prototype scope:** Navigation plus basic integrated text editing defined in §9; implementation has not started.
 - **Workflow phase:** S2 — Design refinement. The design is being tightened before the implementation-readiness gate; implementation has not begun.
-- **Next step:** Complete the agreed design refinements, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
+- **Next step:** Review the v0.6.1 refinements against the agreed design, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
