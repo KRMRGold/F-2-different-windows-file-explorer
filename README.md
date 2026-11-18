@@ -1,7 +1,5 @@
 # F-2 — Different Windows File Explorer
 
-aa
-
 > **Project status:** Initial design / pre-implementation  
 > **Design version:** 0.6.1  
 > **Target platform:** Windows  
