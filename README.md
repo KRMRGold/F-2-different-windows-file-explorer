@@ -1,7 +1,7 @@
 # F-2 — Different Windows File Explorer
 
 > **Project status:** Initial design / pre-implementation  
-> **Design version:** 0.6.1  
+> **Design version:** 0.6.2  
 > **Target platform:** Windows  
 > **Development workflow:** [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md), initially adopted at **v1.9.2**  
 > **Implementation status:** No application implementation has been established by this document.
@@ -63,8 +63,10 @@ The directory hierarchy is shown as a sequence of adjacent levels.
 Expected behavior:
 
 - The first column shows the chosen browsing root.
-- Selecting a folder opens its contents in the next column.
-- Selecting a deeper folder reveals another level.
+- Selecting a folder immediately opens its contents in the next column and makes that folder the active folder.
+- Selecting a deeper folder immediately reveals another level; no separate double-click or Enter activation is required for pointer selection.
+- Keyboard navigation follows the same rule: moving the focused/selected item to a folder updates the active folder and reveals its contents.
+- Selecting a file changes focus/selection only; it does not change the active folder or open the file.
 - Ancestor levels remain represented as the user moves deeper.
 - The selected path is visually clear.
 - Selecting an earlier ancestor updates the navigation levels beyond it.
@@ -98,7 +100,7 @@ The model should distinguish these concepts:
 5. **Selection is preserved by item identity/path where possible.** If the focused or selected item is not visible in the destination view, retain its state without forcing the destination view to jump unexpectedly. If the item no longer exists or is no longer accessible, clear or reconcile that item and provide an understandable result.
 6. **A view does not mutate hidden state.** A branch being invisible in columns does not mean it was collapsed in the shared model.
 7. **User navigation is an intentional state change.** Activating a different folder, changing the active path, or explicitly expanding/collapsing a branch may update the shared model. Merely switching presentation or orientation must not.
-8. **Selection is not activation.** Focus, selection, activation, and active-folder location are separate concepts. A pointer or keyboard action may change focus or selection without changing the active folder unless the interaction is defined as activation for that presentation. Multi-selection must never implicitly activate every selected folder.
+8. **Selection and navigation are presentation-specific.** Focus, selection, activation, and active-folder location remain distinct state concepts, but each presentation defines how a user action changes them. In Miller Columns, selecting or keyboard-focusing a folder is the navigation gesture: it immediately makes that folder the single active folder and reveals its contents in the next column. Selecting a file changes focus/selection only. Multi-selection may select several sibling folders, but it must never create multiple active paths or parallel column chains; the one focused folder determines the single active path. In tree mode, folder expansion/collapse remains separate from changing the active folder.
 
 | State | Tree presentation | Miller Columns presentation | Switching rule |
 |---|---|---|---|
@@ -125,7 +127,7 @@ These are separate state concepts and must not be conflated:
 Presentation-specific interaction rules:
 
 - In **tree mode**, expanding or collapsing a folder changes expansion state only. It does not change the active folder. Activating a folder changes the active folder.
-- In **Miller Columns**, selecting a folder may focus/select it and reveal its contents in the next column, but only the focused/activated folder in the current navigation chain becomes the active folder. Multi-selecting sibling folders must not create multiple active paths. The implementation must choose and document whether pointer selection itself is the activation gesture or whether a separate activation gesture is required; whichever rule is chosen must be consistent with keyboard interaction and tested.
+- In **Miller Columns**, selecting a folder immediately reveals its contents in the next column and makes it the active folder. Pointer selection does not require a separate activation gesture. Keyboard navigation must produce the same result when focus/selection moves to a folder. Selecting a file changes focus/selection only. Multi-selecting sibling folders may preserve multiple selected items, but only the focused folder determines the one active navigation path and column chain.
 - Selecting a file does not change the active folder. It changes focus/selection only.
 - Back/forward navigation and direct path navigation explicitly change the active folder.
 
@@ -390,6 +392,9 @@ The first usable version should demonstrate all of the following:
 - [ ] Expanding a child does not remove its parent or siblings from view.
 - [ ] Column mode shows the ancestor chain alongside the active folder's contents.
 - [ ] Selecting an ancestor updates the deeper navigation context correctly.
+- [ ] Selecting a folder in Miller Columns immediately makes it the active folder and reveals its contents in the next column, for both pointer and keyboard navigation.
+- [ ] Selecting a file in Miller Columns changes focus/selection without changing the active folder.
+- [ ] Multi-selecting sibling folders never creates multiple active paths or parallel column chains.
 - [ ] Switching between tree and column modes preserves the active folder path.
 - [ ] Switching modes does not discard expanded branches merely because the destination view cannot display them.
 - [ ] Valid selection and focus state are preserved or reconciled predictably across mode changes.
@@ -443,10 +448,10 @@ These are stage-specific supporting modules, not additional workflow versions or
 
 ### Current state
 
-- **Design:** Refined initial design; shared navigation semantics and performance constraints documented.
+- **Design:** Refined initial design; Miller Columns folder-selection navigation semantics, shared navigation state, and performance constraints documented.
 - **Implementation:** Not started / not verified.
 - **Tests:** None established or run.
 - **Technology choice:** WinUI 3 + C# + .NET 10 LTS selected for the prototype; exact Windows App SDK version to be confirmed when scaffolding.
 - **Prototype scope:** Navigation plus basic integrated text editing defined in §9; implementation has not started.
 - **Workflow phase:** S2 — Design refinement. The design is being tightened before the implementation-readiness gate; implementation has not begun.
-- **Next step:** Review the v0.6.1 refinements against the agreed design, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
+- **Next step:** Review the v0.6.2 refinements against the agreed design, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
