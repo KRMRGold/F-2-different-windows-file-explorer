@@ -1,7 +1,7 @@
 # F-2 — Different Windows File Explorer
 
 > **Project status:** Initial design / pre-implementation  
-> **Design version:** 0.6.2  
+> **Design version:** 0.6.3  
 > **Target platform:** Windows  
 > **Development workflow:** [Development State Machine Workflow](https://github.com/KRMRGold/Meta-Modules/blob/main/workflows/Development-State-Machine-Workflow.md), initially adopted at **v1.9.2**  
 > **Implementation status:** No application implementation has been established by this document.
@@ -48,6 +48,9 @@ Expected behavior:
 - Preserve expanded branches while navigating elsewhere in the same browsing session.
 - Allow a branch to be collapsed without changing the active folder path.
 - Support keyboard and mouse navigation.
+- A single click on a folder row focuses/selects it without changing the active folder.
+- Use the folder's separate expansion control to expand or collapse it without changing the active folder.
+- Double-clicking a folder row or pressing Enter while it is focused activates that folder and changes the active folder path.
 - Avoid eagerly enumerating every descendant merely because a parent branch is visible.
 
 This is the closest match to the Emacs Dired approach. Emacs Dired can insert a subdirectory listing into the current directory buffer; the community `dired-subtree` extension presents subdirectory contents directly below the directory entry as an indented tree.
@@ -126,7 +129,7 @@ These are separate state concepts and must not be conflated:
 
 Presentation-specific interaction rules:
 
-- In **tree mode**, expanding or collapsing a folder changes expansion state only. It does not change the active folder. Activating a folder changes the active folder.
+- In **tree mode**, a single click on a folder row focuses/selects it only. Its separate expansion control expands or collapses the branch without changing the active folder. Double-clicking the folder row or pressing Enter while it is focused activates it and changes the active folder. Expanding, collapsing, focusing, or selecting alone never changes the active folder.
 - In **Miller Columns**, selecting a folder immediately reveals its contents in the next column and makes it the active folder. Pointer selection does not require a separate activation gesture. Keyboard navigation must produce the same result when focus/selection moves to a folder. Selecting a file changes focus/selection only. Multi-selecting sibling folders may preserve multiple selected items, but only the focused folder determines the one active navigation path and column chain.
 - Selecting a file does not change the active folder. It changes focus/selection only.
 - Back/forward navigation and direct path navigation explicitly change the active folder.
@@ -389,6 +392,9 @@ The first usable version should demonstrate all of the following:
 - [ ] The user can open a starting directory.
 - [ ] The folder hierarchy is understandable at a glance.
 - [ ] Tree mode expands and collapses folders inline.
+- [ ] A single click on a tree folder row focuses/selects it without changing the active folder.
+- [ ] The separate tree expansion control expands/collapses a branch without changing the active folder.
+- [ ] Double-clicking a tree folder row or pressing Enter while it is focused activates that folder and changes the active folder path.
 - [ ] Expanding a child does not remove its parent or siblings from view.
 - [ ] Column mode shows the ancestor chain alongside the active folder's contents.
 - [ ] Selecting an ancestor updates the deeper navigation context correctly.
@@ -448,10 +454,10 @@ These are stage-specific supporting modules, not additional workflow versions or
 
 ### Current state
 
-- **Design:** Refined initial design; Miller Columns folder-selection navigation semantics, shared navigation state, and performance constraints documented.
+- **Design:** Refined initial design; Miller Columns folder-selection navigation semantics, explicit tree focus/expansion/activation gestures, shared navigation state, and performance constraints documented.
 - **Implementation:** Not started / not verified.
 - **Tests:** None established or run.
 - **Technology choice:** WinUI 3 + C# + .NET 10 LTS selected for the prototype; exact Windows App SDK version to be confirmed when scaffolding.
 - **Prototype scope:** Navigation plus basic integrated text editing defined in §9; implementation has not started.
 - **Workflow phase:** S2 — Design refinement. The design is being tightened before the implementation-readiness gate; implementation has not begun.
-- **Next step:** Review the v0.6.2 refinements against the agreed design, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
+- **Next step:** Review the v0.6.3 refinements against the agreed design, then enter S3 — Ready to implement only when the scope and acceptance checks are coherent, the current repository baseline is identified, and the Windows development environment and available test tooling have been inspected. Scaffolding is the first S4 implementation action, not evidence that the navigation or editor features are implemented.
